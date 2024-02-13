@@ -41,7 +41,7 @@ int main() {
     double drytol = 1.0e-3;
     double earth_radius = 6371000.0;
     int coordinate_system = 1;
-    int mx = 4, mbc = 2;
+    int mx = 16, mbc = 2;
     int ix = 0, iy = 0;
     int my = mx;
 
@@ -65,78 +65,84 @@ int main() {
     aux2[0] = 0.0;
     aux3[0] = 0.0;
     
-    ql[0] = 0.4473496224909771e2;  
-    ql[1] = -0.1018126050977528e-13;
-    ql[2] = -0.6489769399271391e-9;
+    // ql[0] = 0.4473496224909771e2;  
+    // ql[1] = -0.1018126050977528e-13;
+    // ql[2] = -0.6489769399271391e-9;
 
-    qr[0] = 0.2519771920562447e2;
-    qr[1] = -0.2016857953898484e-13;
-    qr[2] = -0.3325890167957528e-9;
+    // qr[0] = 0.2519771920562447e2;
+    // qr[1] = -0.2016857953898484e-13;
+    // qr[2] = -0.3325890167957528e-9;
 
-    auxl[0] = 0.9999999999996810e2;
-    auxr[0] = 0.9999999999997937e2;
+    // auxl[0] = 0.9999999999996810e2;
+    // auxr[0] = 0.9999999999996810e4;
 
-    // ql[0] = 2.0;
-    // ql[1] = 0.0;
-    // ql[2] = 0.0;
+    ql[0] = 2;
+    ql[1] = 0.0;
+    ql[2] = 0.0;
 
-    // qr[0] = 1.0;
-    // qr[1] = 0.0;
-    // qr[2] = 0.0;
+    qr[0] = 1;
+    qr[1] = 0.0;
+    qr[2] = 0.0;
 
-    // aux1[0] = 0.0;
-    // aux2[0] = 0.0;
+    auxl[0] = 0.0;
+    auxr[0] = 0.0;
     
-    double t0 = 0, Tfinal = 12;
-    double ax = 953236, bx = 959554, ay = 1832407.25, by = 1848572.75;
-    // double ax = -4, bx = 4, ay = -2, by = 2;
+    double t0 = 0, Tfinal = 10;
+    // double ax = 953236, bx = 959554, ay = 1832407.25, by = 1848572.75;
+    double ax = -4, bx = 4, ay = -2, by = 2;
     double dx = (bx- ax)/mx;
-    double maxcfl = 0.9;
-    double a = 1.7;
-    double dt_est = maxcfl*dx/a;
-    int M = (int)floor(Tfinal/dt_est) + 1;
-    double dt = Tfinal/M;
+    double cfl = 0.75;
     
-    double *t = (double*)malloc(M*sizeof(double));
-    for (int i =0; i<M; i++){
-        t[i] = t0;
-        t0 = t0 + i*dt;
-    }
-    
-    double xe[mx+1]; 
-    double x[mx]; 
-
-    for(int i = 0; i <= mx; i++) {
-        xe[i] = ax + i * dx;
-    }
-
-    for(int i = 0; i < mx; i++) {
-        x[i] = xe[i] + dx / 2;
-    }
-   
    double *h = (double*)malloc(mx*sizeof(double));
    double *hu = (double*)malloc(mx*sizeof(double));
    double *hv = (double*)malloc(mx*sizeof(double));
    double *qoldl = (double*)malloc(mwaves*sizeof(double));
    double *qoldr = (double*)malloc(mwaves*sizeof(double));
-   
+   double *cxx = (double*)malloc(mx*sizeof(double));
+   double *cyy = (double*)malloc(mx*sizeof(double));
+   double *Fm = (double*)malloc(mx*sizeof(double));
+   double *Fp = (double*)malloc(mx*sizeof(double));
+
     qoldl = ql;
     qoldr = qr;
-   for(int n=0; n<M; n++){
+    double maxcfl = 0.0;
+    double currenttime = 0.0;
+    double maxspeed, dt_est,t;
+    double dt = 0.01;
+    bool cfl_violated = false;
+
+    while (currenttime < Tfinal) {
        h[0] = qoldl[0];
        hu[0] = qoldl[1];
        hv[0] = qoldl[2];
        h[1] = qoldr[0];
        hu[1] = qoldr[1];
        hv[1] = qoldr[2];
-
+       cfl_violated = false; // Reset the flag for each time step
        for(int i=1; i<mx; i++){
 
            // normal solver    
            cudaflood_rpn2(idir, meqn, mwaves, maux, qoldl, 
                             qoldr, auxl, auxr, fwave, s, amdq, apdq, ix,
                             iy, s_grav, drytol, earth_radius, mcapa);
-            
+
+            // time stepping for the normal solver
+            for (int mw = 0; mw < mwaves; mw++) {
+                maxspeed = fabs(s[mw]);
+                maxcfl = fmax(maxcfl, maxspeed*dt/dx);
+                // if (maxcfl > cfl) maxcfl = cfl;
+                // dt_est = maxcfl*dx/fmax(maxspeed,1e-6);
+            }
+            t = currenttime + dt;
+            // dt = fmin(dt_est, Tfinal - currenttime);
+
+            if (maxcfl > cfl) {
+                dt *= 0.5; // Reduce dt by a factor
+                // maxcfl = cfl;
+                cfl_violated = true; // Set the flag
+                break; // Break out of the spatial loop
+            }
+
             // Transverse solver
             // if(idir ==0 && imp == 0) asdq = amdq;
             // asdq = apdq;
@@ -155,11 +161,18 @@ int main() {
             // printf("bmasdq = %.16f,  %.16f,  %.16f\n", bmasdq[0], bmasdq[1], bmasdq[2]);
             // printf("bpasdq = %.16f,  %.16f,  %.16f\n\n", bpasdq[0], bpasdq[1], bpasdq[2]);
             
-            exit(0);
+            // exit(0);
             // used if we want to use the normal solver only
             h[i] = h[i] - (dt/dx)*(amdq[0] + apdq[0]);
             hu[i] = hu[i] - (dt/dx)*(amdq[1] + apdq[1]);
             hv[i] = hv[i] - (dt/dx)*(amdq[2] + apdq[2]);
+
+            // second order update
+            // for (int j = 0; j < mwaves; j++){
+
+            // }
+            // Fp = cxx;
+            // Fm = cxx;
 
             // using both normal and transverse solver
             double dy = dx;
@@ -178,16 +191,30 @@ int main() {
             qoldr[1] = hu[i];
             qoldr[2] = hv[i];
             
+            printf("dt = %.16f, maxcfl = %.16f, t = %.16f\n", dt, maxcfl,t);
             printf("qoldl = %.16f, %.16f, %.16f\n", qoldl[0],qoldl[1],qoldl[2]);
             printf("qoldr = %.16f, %.16f, %.16f\n\n", qoldr[0],qoldr[1],qoldr[2]);
             // printf("dt = %.16f, dx = %.16f, dt/dx = %.16f, amdq[1] = %.16f, apdq[1] = %.16f\n\n", dt, dx, dt/dx, amdq[1], apdq[1]);
-            // exit(0);
        }
+    
+       if (cfl_violated) {
+            if (t < Tfinal) {
+                continue;
+            } else {
+                printf("CFL violation at time t = %.16f\n", t);
+                exit(1);
+            }
+       }
+       
+       currenttime += dt;
+       dt_est = maxcfl * dx / (maxspeed + 1e-10); // Recalculate dt based on the latest maxspeed
+       dt = fmin(dt_est, Tfinal - currenttime);
+
    }
     
     /* Free allocated memory */
     free(ql); free(qr); free(auxl); free(auxr); free(fwave); free(s); free(amdq); free(apdq);
-    free(t);  free(h); free(hu); free(hv); free(qoldl); free(qoldr); free(aux1); free(aux2); free(aux3); free(asdq); free(bmasdq); free(bpasdq); 
+     free(h); free(hu); free(hv); free(qoldl); free(qoldr); free(aux1); free(aux2); free(aux3); free(asdq); free(bmasdq); free(bpasdq); free(cxx); free(cyy); free(Fm); free(Fp);
 
     return 0;
 } /* end of the main function */
@@ -276,15 +303,25 @@ void cudaflood_rpn2(int idir, int meqn, int mwaves,
 
     if (ql[0] > drytol || qr[0] > drytol) {
         /* Riemann problem variables */
-        hL = ql[0];
-        hR = qr[0];
-        huL = ql[mu];
-        huR = qr[mu];
-        bL = auxl[0];
-        bR = auxr[0];
+        // hL = ql[0];
+        // hR = qr[0];
+        // huL = ql[mu];
+        // huR = qr[mu];
+        // bL = auxl[0];
+        // bR = auxr[0];
 
         hvL = ql[mv];
         hvR = qr[mv];
+
+        hL = qr[0];
+        hR = ql[0];
+        huL = qr[mu];
+        huR = ql[mu];
+        bL = auxr[0];
+        bR = auxl[0];
+
+        hvL = qr[mv];
+        hvR = ql[mv];
 
         // Check for wet/dry left boundary
         if (hR > drytol) {
@@ -389,6 +426,23 @@ void cudaflood_rpn2(int idir, int meqn, int mwaves,
                 bL = hR + bR;
             }
         }
+        // swap variables
+        // double htemp = hL;
+        // double uhtemp = huL;
+        // double vhtemp = hvL;
+        // double btemp = bL;
+        // double phitemp = phiL;
+        // hL = hR;
+        // hR = htemp;
+        // huL = huR;
+        // huR = uhtemp;
+        // hvL = hvR;
+        // hvR = vhtemp;
+        // bL = bR;
+        // bR = btemp;
+        // phiL = phiR;
+        // phiR = phitemp;
+
 
         // if (debug){
         //     printf("ix = %d, iy = %d\n " \ 

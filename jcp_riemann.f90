@@ -3,43 +3,43 @@ program main
     
     ! Declarations
     integer :: ixy, maxm, meqn, mwaves, maux, mbc, mx, mcapa,i
-    integer coordinate_system, imp,M,n,j
-    double precision dx, maxcfl, a, dt_est, dt
+    integer coordinate_system, imp,M,n,j,mw
+    double precision dx, maxcfl, cfl, dt_est, dt,t
+    double precision currenttime, maxspeed
     double precision t0, Tfinal, ax, bx, ay, by
     double precision :: drytol, earth_radius, deg2rad, g
     double precision, allocatable :: ql(:,:), qr(:,:), auxl(:,:), auxr(:,:),aux1(:,:), aux2(:,:),aux3(:,:)
     double precision, allocatable :: fwave(:,:,:), s(:,:), amdq(:,:), apdq(:,:)
     double precision, allocatable :: asdq(:,:), bmasdq(:,:), bpasdq(:,:)
-    double precision, allocatable :: t(:)
     double precision, allocatable :: xe(:), x(:)
     double precision, allocatable :: h(:), hu(:), hv(:)
     double precision, allocatable :: qoldl(:,:), qoldr(:,:)
 
+    logical :: cfl_violated
+
+    cfl_violated =.false.
+
     ! Initialize variables - Replace with actual values
     ixy = 1
-    maxm = 4
+    maxm = 16
     meqn = 3
     mwaves = 3
     maux = 1
     mbc = 2
-    ax = 953236
-    bx = 959554
-    ay = 1832407.25
-    by = 1848572.75
-   ! ax = -4
-   ! bx = 4
-   ! ay = -2
-   ! by = 2
-    maxcfl = 0.9d0
-    a = 1.7d0
+   !  ax = 953236
+   !  bx = 959554
+   !  ay = 1832407.25
+   !  by = 1848572.75
+   ax = -4
+   bx = 4
+   ay = -2
+   by = 2
+    cfl = 0.75d0
     t0 = 0.0d0
-    Tfinal = 12d0
+    Tfinal = 10d0
     
     ! Compute dx and dt_est
     dx = (bx - ax) / maxm
-    dt_est = maxcfl * dx / a
-    M = int(Tfinal / dt_est) + 1  ! Using floor intrinsic function
-    dt = Tfinal / M
     
     ! Allocate and initialize arrays
     allocate(ql(meqn, 1-mbc:maxm+mbc))
@@ -59,8 +59,6 @@ program main
     allocate(asdq(meqn, 1-mbc:maxm+mbc))
     allocate(bmasdq(meqn, 1-mbc:maxm+mbc))
     allocate(bpasdq(meqn, 1-mbc:maxm+mbc))
-    allocate(t(M))
-    allocate(xe(1-mbc:maxm+mbc + 1), x(1-mbc:maxm+mbc))
     allocate(h(1-mbc:maxm+mbc), hu(1-mbc:maxm+mbc), hv(1-mbc:maxm+mbc))
   
     
@@ -74,32 +72,32 @@ program main
     coordinate_system = 1
     imp = 1
 
-   ql(1,:) = 0.4473496224909771D2
-   ql(2,:) = -0.1018126050977528D-13
-   ql(3,:) = -0.6489769399271391D-9
+   ! ql(1,:) = 0.4473496224909771D2
+   ! ql(2,:) = -0.1018126050977528D-13
+   ! ql(3,:) = -0.6489769399271391D-9
 
-   qr(1,:) = 0.2519771920562447D2
-   qr(2,:) = -0.2016857953898484D-13
-   qr(3,:) = -0.3325890167957528D-9
+   ! qr(1,:) = 0.2519771920562447D2
+   ! qr(2,:) = -0.2016857953898484D-13
+   ! qr(3,:) = -0.3325890167957528D-9
 
-   auxl(1,:) = 0.9999999999996810d2
-   auxl(2,:) = 0.0d0
+   ! auxl(1,:) = 0.9999999999996810d2
+   ! ! auxl(2,:) = 0.0d0
 
-   auxr(1,:) = 0.9999999999997937d2
-   auxr(2,:) = 0.0d0
+   ! auxr(1,:) = 0.9999999999996810d4
+   ! auxr(2,:) = 0.0d0
 
-   ! ql(1,:) = 2.0d0
-   ! ql(2,:) = 0.0d0
-   ! ql(3,:) = 0.0d0
+   ql(1,:) = 2.0d0
+   ql(2,:) = 0.0d0
+   ql(3,:) = 0.0d0
 
-   ! qr(1,:) = 1.0d0
-   ! qr(2,:) = 0.0d0
-   ! qr(3,:) = 0.0d0
+   qr(1,:) = 1.0d0
+   qr(2,:) = 0.0d0
+   qr(3,:) = 0.0d0
 
-   ! auxl(1,:) = 0.0d0
+   auxl(1,:) = 0.0d0;
    ! auxl(2,:) = 0.0d0
 
-   ! auxr(1,:) = 0.0d0
+   auxr(1,:) = 0.0d0
    ! auxr(2,:) = 0.0d0
 
    ! transverse solver
@@ -111,36 +109,45 @@ program main
     aux2(2,:) = 0.0d0
     aux3(2,:) = 0.0d0
     
-    ! Initialize time array
-    do i = 1, M
-        t(i) = t0
-        t0 = t0 + i*dt
-    end do
-
-    ! Compute grid points
-    do i = 1, mx + 1
-        xe(i) = ax + (i-1) * dx
-    end do
-
-    do i = 1, mx
-        x(i) = xe(i) + dx / 2
-    end do
+    
     
     qoldl = ql
     qoldr = qr
-    do n = 1,M
+    maxcfl = 0.0d0
+    currenttime = 0.0d0
+    dt = 0.01d0
+
+   !  do n = 1,M
+   do while (currenttime < Tfinal)
+
         h(1) = qoldl(1,1)
         hu(1) = qoldl(2,1)
         hv(1) = qoldl(3,1)
         h(2) = qoldr(1,2)
         hu(2) = qoldr(2,2)
         hv(2) = qoldr(3,2)
-        
+
+        cfl_violated =.false.  ! Reset cfl_violated flag each time through loop
+
         do j = 2,maxm
             ! Normal solver
             call fc2d_geoclaw_rpn2(ixy, maxm, meqn, mwaves, maux, mbc, mx, &
                            qoldl, qoldr, auxl, auxr, fwave, s, amdq, apdq, g, drytol, &
                            earth_radius, deg2rad, mcapa)
+
+             i = j
+            do mw=1,mwaves
+               maxspeed = abs(s(mw,i))
+               maxcfl = max(maxcfl,maxspeed*dt/dx)
+            enddo
+
+            t = currenttime + dt
+
+            if (maxcfl > cfl) then
+               dt = dt*0.5d0
+               cfl_violated =.true.
+               return
+            end if
 
             ! if (imp == 1 .and. ixy == 1) asdq = amdq
             ! asdq = apdq
@@ -150,7 +157,7 @@ program main
       
             ! write out 
             ! do i=2-mbc,mx+mbc
-            i = j
+           
            write(*,*) 's = ', s(1:3,i)
            write(*,*) 'fwave = ', fwave(1,1,i), fwave(2,1,i), fwave(3,1,i)
            write(*,*) 'fwave = ', fwave(1,2,i), fwave(2,2,i), fwave(3,2,i)
@@ -163,7 +170,7 @@ program main
             ! write(*,*) 'bmasdq = ', bmasdq(1,i), bmasdq(2,i), bmasdq(3,i)
             ! write(*,*) 'bpasdq = ', bpasdq(1,i), bpasdq(2,i), bpasdq(3,i)
             ! write(*,*) ' '
-           stop
+         !   stop
            h(j) = h(j) - (dt/dx)*(amdq(1,j) + apdq(1,j))
            hu(j) = hu(j) - (dt/dx)*(amdq(2,j) + apdq(2,j))
            hv(j) = hv(j) - (dt/dx)*(amdq(3,j) + apdq(3,j))
@@ -181,12 +188,28 @@ program main
           qoldr(2,:) = hu(j)
           qoldr(3,:) = hv(j)
           
+          write(*,*) "dt = ", dt, "maxcfl = ", maxcfl, "t = ", t
           write(*,*) "qoldl = ", qoldl(1,j), qoldl(2,j), qoldl(3,j)
           write(*,*) "qoldr = ", qoldr(1,j), qoldr(2,j), qoldr(3,j)
         !   write(*,*) "dt = ", dt, " dx = ", dx, "dt/dx = ", dt/dx, " amdq = ", amdq(2,j), " apdq = ", apdq(2,j) 
         !   stop
         enddo
-    end do
+   if (cfl_violated) then
+      if (t<Tfinal) then
+          continue
+      else
+         write(*,*) "CFL violation at time ", t
+         stop
+      end if
+   end if   
+
+   ! Compute new time
+   currenttime = currenttime + dt
+   dt_est = maxcfl * dx/ (maxspeed + 1.d-10)
+   dt = min(dt_est, Tfinal - currenttime)
+
+enddo
+
     
 !     ! Normal solver
 !     call fc2d_geoclaw_rpn2(ixy, maxm, meqn, mwaves, maux, mbc, mx, &
@@ -211,7 +234,7 @@ program main
     deallocate(ql, qr, auxl, auxr, aux1, aux2, aux3, fwave, s, amdq, apdq, asdq, &
                 bpasdq, bmasdq)
     ! deallocate(t, xe, x, h, hu, hv, qoldl, qoldr)
-    deallocate(t,xe,qoldl,qoldr,x)
+    deallocate(qoldl,qoldr)
 end program main
 
 
@@ -324,25 +347,25 @@ end program main
          endif
 
          !Riemann problem variables
-        !  hL = qr(1,i-1) 
-        !  hR = ql(1,i) 
-        !  huL = qr(mu,i-1) 
-        !  huR = ql(mu,i) 
-        !  bL = auxr(1,i-1)
-        !  bR = auxl(1,i)
+         hL = qr(1,i-1) 
+         hR = ql(1,i) 
+         huL = qr(mu,i-1) 
+         huR = ql(mu,i) 
+         bL = auxr(1,i-1)
+         bR = auxl(1,i)
          
-        !  hvL=qr(nv,i-1) 
-        !  hvR=ql(nv,i)
+         hvL=qr(nv,i-1) 
+         hvR=ql(nv,i)
 
-         hL = ql(1,i-1) 
-         hR = qr(1,i) 
-         huL = ql(mu,i-1) 
-         huR = qr(mu,i) 
-         bL = auxl(1,i-1)
-         bR = auxr(1,i)
+         ! hL = ql(1,i-1) 
+         ! hR = qr(1,i) 
+         ! huL = ql(mu,i-1) 
+         ! huR = qr(mu,i) 
+         ! bL = auxl(1,i-1)
+         ! bR = auxr(1,i)
          
-         hvL=ql(nv,i-1) 
-         hvR=qr(nv,i)
+         ! hvL=ql(nv,i-1) 
+         ! hvR=qr(nv,i)
         
 
          !check for wet/dry boundary
